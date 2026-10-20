@@ -82,8 +82,8 @@ def balance(principal,annual,payment,n):
  r=annual/12
  return principal*(1+r)**n-payment*((1+r)**n-1)/r if r else principal-payment*n
 
-EARLY_DEFAULTS={'opening_cash':0.0,'opening_portfolio':0.0,'salary_2026':12500.0,'salary_2027':12500.0,'living':6500.0,'tuition':3534.0,'visa':1800.0,'bonus_2027':0.0}
-EARLY_LABELS={'opening_cash':'Cash at October 2026','opening_portfolio':'Portfolio at October 2026','salary_2026':'Net salary Oct–Dec 2026','salary_2027':'Net salary 2027','living':'Monthly living expenses (estimate)','tuition':'Monthly university fees (estimate)','visa':'Monthly credit card payment (estimate)','bonus_2027':'January 2027 bonus'}
+EARLY_DEFAULTS={'opening_cash':0.0,'opening_portfolio':0.0,'salary_2026':12500.0,'salary_2027':12500.0,'living':6500.0,'tuition':3534.0,'visa':1800.0,'bonus_2027':0.0,'invest_early':1000.0,'invest_pre_villa':3000.0,'cash_reserve':10000.0}
+EARLY_LABELS={'opening_cash':'Cash at October 2026','opening_portfolio':'Portfolio at October 2026','salary_2026':'Net salary Oct–Dec 2026','salary_2027':'Net salary 2027','living':'Monthly living expenses (estimate)','tuition':'Monthly university fees (estimate)','visa':'Monthly credit card payment (estimate)','bonus_2027':'January 2027 bonus','invest_early':'Monthly investment 2026–27 (estimate)','invest_pre_villa':'Monthly investment 2028–2035 (estimate)','cash_reserve':'Minimum cash reserve before investing'}
 def read_early(data):
  out=dict(EARLY_DEFAULTS)
  w=load_workbook(io.BytesIO(data),read_only=False,data_only=True)
@@ -103,7 +103,11 @@ def simulate(d,early=None):
    net=early['salary_2026'] if year==2026 else early['salary_2027']
    bonus=early['bonus_2027'] if (year,month)==(2027,1) else 0
    costs=early['living']+early['tuition']+(early['visa'] if (year,month)<=(2027,1) else 0)
-   flow=net+bonus-costs;cash+=flow;income+=net+bonus;bonus_total+=bonus;spending+=costs
+   flow=net+bonus-costs
+   invest=min(max(0,cash+flow-early['cash_reserve']),max(0,early['invest_early']))
+   flow-=invest;portfolio+=invest
+   portfolio*=((1+d[33])**(1/12))
+   cash+=flow;income+=net+bonus;bonus_total+=bonus;spending+=costs
    lowest=min(lowest,cash)
    monthly.append({'year':year,'month':month,'cash':cash,'portfolio':portfolio,'net_cash_flow':flow})
   rows.append({'السنة':year,'الدخل':income,'البونص':bonus_total,'المعيشة والأقساط':spending,'أحداث مالية صافية':0,'استثمار جديد':0,'السيولة':cash,'المحفظة':portfolio,'الثروة السائلة':cash+portfolio})
@@ -132,8 +136,15 @@ def simulate(d,early=None):
     flow-=mortgage;spending+=mortgage
     invest=min(max(0,cash+flow-d[32]),d[35]+(bonus*d[36] if bonus else 0))
     flow-=invest;portfolio+=invest;investment_total+=invest
-   if mortgage_started:
-    portfolio*=((1+d[33])**(1/12))
+   if not mortgage_started:
+    invest=min(max(0,cash+flow-early['cash_reserve']),max(0,early['invest_pre_villa']))
+    flow-=invest;portfolio+=invest;investment_total+=invest
+   # Draw from invested assets only when a major planned outflow would otherwise
+   # create negative cash; the remaining shortfall is explicitly shown as a deficit.
+   if cash+flow<0 and portfolio>0:
+    withdrawal=min(portfolio,-(cash+flow))
+    portfolio-=withdrawal;flow+=withdrawal
+   portfolio*=((1+d[33])**(1/12))
     if month==12 and year>int(d[26]):portfolio-=min(max(0,portfolio),d[37])
    cash+=flow;lowest=min(lowest,cash)
    monthly.append({'year':year,'month':month,'cash':cash,'portfolio':portfolio,'net_cash_flow':flow})
@@ -153,7 +164,7 @@ if 'last_file' not in st.session_state or st.session_state.last_file!=hash(sourc
  for k,v in early_values.items():st.session_state[f'early_{k}']=float(v)
 with st.sidebar.expander('🗓️ 2026–2027 | مرحلة التأسيس',expanded=True):
  for k,label in EARLY_LABELS.items():st.number_input(label,key=f'early_{k}',step=100.0,format='%.0f')
- st.caption('مصاريف 2026–2027 تقديرية وقابلة للتعديل؛ بونص يناير 2027 يبدأ من صفر حتى تدخل قيمته.')
+ st.caption('الاستثمار الشهري تقديري، ويتوقف إذا كانت السيولة أقل من الاحتياطي. العائد السنوي افتراض وليس ضمانًا. بونص يناير 2027 يبدأ من صفر.')
 with st.sidebar.expander('الدخل والبونص',expanded=False):
  for i in [5,6,7,8,9,10,11,4,3]:
   step=.01 if i in PCT else 1.0 if i in YEARS else 500.0
