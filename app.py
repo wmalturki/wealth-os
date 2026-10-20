@@ -67,7 +67,7 @@ def workbook_rows(w):
     return mapping
 
 def read_inputs(data):
-    w=load_workbook(io.BytesIO(data),read_only=True,data_only=False)
+    w=load_workbook(io.BytesIO(data),read_only=False,data_only=False)
     mapping=workbook_rows(w)
     d={i:float(w['Inputs'].cell(mapping[name],2).value or 0) for i,name in FIELD_NAMES.items()}
     w.close()
