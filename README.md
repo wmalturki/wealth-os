@@ -1,14 +1,10 @@
 # WEALTH OS
 
-Personal financial planning dashboard (2028–2040), powered by Streamlit and an Excel workbook.
+Interactive financial dashboard powered by the included Excel workbook.
 
-## Deploy
-1. Upload `app.py`, `requirements.txt`, and `financial_goals_tracker_2028_2040.xlsx` to this repository.
-2. Sign in at https://share.streamlit.io/ with GitHub.
-3. Select repository `wmalturki/wealth-os`, branch `main`, entrypoint `app.py` and click **Deploy**.
+## Deploy on Streamlit Community Cloud
+1. Create a new GitHub repository and upload `app.py`, `requirements.txt`, and `financial_goals_tracker_2028_2040.xlsx` to the repository root.
+2. Sign in to Streamlit Community Cloud with GitHub, click **Create app**, select the repository, branch `main`, and main file `app.py`.
+3. Deploy, then open the generated URL.
 
-## Privacy
-The workbook may contain financial details. Avoid publishing identifiable or sensitive information. On a public repository, files are public; an app being publicly accessible also exposes dashboard output.
-
-## Updating the Excel data
-The app supports importing an updated workbook. Changes uploaded through a browser session are not automatically committed back to GitHub.
+**Privacy:** If the GitHub repository or Streamlit app is public, all data in the included Excel workbook is potentially public. Do not upload personal identifiers, account numbers, or credentials. The app currently uses Excel file upload/download for updates; uploads are not permanently saved to GitHub.
