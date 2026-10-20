@@ -145,7 +145,7 @@ def simulate(d,early=None):
     withdrawal=min(portfolio,-(cash+flow))
     portfolio-=withdrawal;flow+=withdrawal
    portfolio*=((1+d[33])**(1/12))
-    if month==12 and year>int(d[26]):portfolio-=min(max(0,portfolio),d[37])
+   if month==12 and year>int(d[26]):portfolio-=min(max(0,portfolio),d[37])
    cash+=flow;lowest=min(lowest,cash)
    monthly.append({'year':year,'month':month,'cash':cash,'portfolio':portfolio,'net_cash_flow':flow})
   rows.append({'السنة':year,'الدخل':income,'البونص':bonus_total,'المعيشة والأقساط':spending,'أحداث مالية صافية':goalcost,'استثمار جديد':investment_total,'السيولة':cash,'المحفظة':portfolio,'الثروة السائلة':cash+portfolio})
