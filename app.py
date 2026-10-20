@@ -152,7 +152,7 @@ c.metric('المحفظة الاستثمارية',sar(r['المحفظة']))
 e.metric('الدخل السنوي',sar(r['الدخل']))
 if lowest<0:st.error(f'⚠️ الخطة تُظهر عجزًا نقديًا مؤقتًا يصل إلى {sar(-lowest)}. يلزم تعديل توقيت الأهداف أو التمويل.')
 else:st.success('✓ لا يظهر عجز نقدي في التدفقات الشهرية وفق الافتراضات المدخلة. هذا لا يغني عن اختبار المخاطر.')
-t1,t2,t3,t4=st.tabs(['📊 نظرة عامة','🎯 الأهداف','💸 التدفقات النقدية','🧪 اختبار السيناريوهات'])
+t1,t2,t3,t4,t5,t6=st.tabs(['📊 نظرة عامة','🎯 الأهداف','💸 التدفقات النقدية','🧪 اختبار السيناريوهات','📅 Actual vs Forecast','💎 Net Worth & Portfolio'])
 with t1:
  fig=go.Figure()
  for col,color in [('السيولة','#4DB9B4'),('المحفظة','#D3AD71'),('الثروة السائلة','#8D9FF2')]:
@@ -194,6 +194,98 @@ with t4:
   comparison.append({'العائد المفترض':f'{rate:.0%}','محفظة 2038':out.loc[out['السنة']==2038,'المحفظة'].iloc[0],'محفظة 2040':out.loc[out['السنة']==2040,'المحفظة'].iloc[0]})
  st.dataframe(pd.DataFrame(comparison).style.format({'محفظة 2038':'{:,.0f}','محفظة 2040':'{:,.0f}'}),hide_index=True,use_container_width=True)
  st.warning('العوائد افتراضية وليست مضمونة. المحاكاة لا تشمل التضخم، الرسوم، ضرائب محتملة، الأطفال، أو هبوط الأسواق المفاجئ.')
+
+
+# Monthly actuals come from the workbook's Update Log. No personal data is persisted on the server.
+def actual_history(raw):
+    book=load_workbook(io.BytesIO(raw),read_only=False,data_only=True)
+    try:
+        sheet=book['Update Log']
+        records=[]
+        for vals in sheet.iter_rows(min_row=4,max_col=7,values_only=True):
+            if vals[0] is None:continue
+            dt=pd.to_datetime(vals[0],errors='coerce')
+            if pd.isna(dt):continue
+            def num(v):
+                try:return float(v) if v is not None and v!='' else None
+                except (ValueError,TypeError):return None
+            records.append({'date':dt,'salary':num(vals[1]),'bonus':num(vals[2]),
+                            'cash':num(vals[3]),'portfolio':num(vals[4]),
+                            'debt':num(vals[5]),'notes':str(vals[6] or '')})
+        if not records:return pd.DataFrame()
+        result=pd.DataFrame(records).sort_values('date').drop_duplicates('date',keep='last')
+        result['period']=result['date'].dt.to_period('M')
+        return result.drop_duplicates('period',keep='last').reset_index(drop=True)
+    finally:book.close()
+
+try:
+    actuals=actual_history(source)
+    actual_error=None
+except Exception as err:
+    actuals=pd.DataFrame()
+    actual_error=str(err)
+
+with t5:
+    st.subheader('Actual vs Forecast | الفعلي مقابل الخطة')
+    st.caption('أدخل بيانات كل شهر في Update Log داخل ملف Excel، ثم ارفع الملف مجددًا. المقارنة تبدأ من يناير 2028؛ الأشهر السابقة لا تتوفر لها توقعات في النموذج.')
+    if actual_error:st.warning(f'تعذر قراءة سجل الأرقام الفعلية: {actual_error}')
+    elif actuals.empty:st.info('ما فيه بيانات شهرية فعلية حتى الآن. افتح تبويب Update Log في الإكسل، وأدخل التاريخ والكاش والمحفظة والديون ثم ارفعه.')
+    else:
+        actuals['forecast_cash']=actuals.apply(lambda z: monthly.loc[(monthly['year']==z['period'].year)&(monthly['month']==z['period'].month),'cash'].iloc[0] if ((monthly['year']==z['period'].year)&(monthly['month']==z['period'].month)).any() else float('nan'),axis=1)
+        actuals['forecast_portfolio']=actuals.apply(lambda z: monthly.loc[(monthly['year']==z['period'].year)&(monthly['month']==z['period'].month),'portfolio'].iloc[0] if ((monthly['year']==z['period'].year)&(monthly['month']==z['period'].month)).any() else float('nan'),axis=1)
+        actuals['actual_liquid']=actuals['cash']+actuals['portfolio']
+        actuals['forecast_liquid']=actuals['forecast_cash']+actuals['forecast_portfolio']
+        valid=actuals.dropna(subset=['actual_liquid','forecast_liquid'])
+        if not valid.empty:
+            last=valid.iloc[-1]
+            x,y,z=st.columns(3)
+            x.metric('الثروة السائلة الفعلية',sar(last['actual_liquid']))
+            y.metric('المخطط لنفس الشهر',sar(last['forecast_liquid']))
+            z.metric('الفرق عن الخطة',sar(last['actual_liquid']-last['forecast_liquid']))
+            graph=go.Figure()
+            graph.add_trace(go.Scatter(x=valid['date'],y=valid['actual_liquid'],name='Actual',mode='lines+markers',line=dict(color='#4DB9B4',width=3)))
+            graph.add_trace(go.Scatter(x=valid['date'],y=valid['forecast_liquid'],name='Forecast',mode='lines+markers',line=dict(color='#D3AD71',width=3,dash='dash')))
+            graph.update_layout(template='plotly_dark',paper_bgcolor='#0B111B',plot_bgcolor='#0B111B',height=360,yaxis_title='SAR')
+            st.plotly_chart(graph,use_container_width=True)
+        else:st.info('أدخل النقد والمحفظة معًا في سجل Update Log للأشهر الواقعة بين 2028 و2040 لإظهار المقارنة.')
+        st.dataframe(actuals[['date','salary','bonus','cash','portfolio','debt','notes']].rename(columns={'date':'الشهر','salary':'الراتب','bonus':'البونص','cash':'النقد','portfolio':'المحفظة','debt':'الديون','notes':'ملاحظات'}),hide_index=True,use_container_width=True)
+
+with t6:
+    st.subheader('Net Worth & Portfolio | صافي الثروة والمحفظة')
+    st.caption('صافي الثروة هنا = النقد + المحفظة − الديون المسجلة. لا يشمل قيمة العقارات والسيارات إلا إذا أضفتها لاحقًا ضمن نموذج أصول منفصل.')
+    if actuals.empty:st.info('سجّل النقد والمحفظة والديون في Update Log حتى يظهر تطور صافي ثروتك.')
+    else:
+        tracked=actuals.dropna(subset=['cash','portfolio','debt']).copy()
+        if tracked.empty:st.info('أدخل القيم الثلاث: الكاش، المحفظة، والديون. اكتب 0 عندما لا توجد ديون.')
+        else:
+            tracked['net_worth']=tracked['cash']+tracked['portfolio']-tracked['debt']
+            latest=tracked.iloc[-1]
+            a,b,c=st.columns(3)
+            a.metric('صافي الثروة المسجل',sar(latest['net_worth']))
+            b.metric('رصيد المحفظة',sar(latest['portfolio']))
+            c.metric('إجمالي الديون',sar(latest['debt']))
+            graph=go.Figure()
+            for col,label,color in [('net_worth','Net Worth','#8D9FF2'),('portfolio','Portfolio','#D3AD71'),('cash','Cash','#4DB9B4')]:
+                graph.add_trace(go.Scatter(x=tracked['date'],y=tracked[col],mode='lines+markers',name=label,line=dict(color=color,width=3)))
+            graph.update_layout(template='plotly_dark',paper_bgcolor='#0B111B',plot_bgcolor='#0B111B',height=380,yaxis_title='SAR')
+            st.plotly_chart(graph,use_container_width=True)
+            st.markdown('#### Portfolio balance trend | نمو رصيد المحفظة')
+            st.caption('هذا يعرض تغير قيمة المحفظة، وليس العائد الاستثماري الحقيقي؛ لأن الإيداعات والسحوبات غير مسجلة بصورة مستقلة.')
+            changes=tracked[['date','portfolio']].copy()
+            changes['change_SAR']=changes['portfolio'].diff()
+            st.dataframe(changes.rename(columns={'date':'الشهر','portfolio':'رصيد المحفظة','change_SAR':'تغير الرصيد (ريال)'}),hide_index=True,use_container_width=True)
+    st.markdown('#### Goal readiness | جاهزية الأهداف')
+    if actuals.empty or actuals['cash'].dropna().empty:
+        st.caption('أدخل الكاش الفعلي حتى نحسب جاهزيتك النقدية للأهداف القادمة.')
+    else:
+        current_cash=float(actuals['cash'].dropna().iloc[-1])
+        goal_rows=[('زواج',int(d[14]),d[15]),('السيارة الثانية',int(d[24]),d[25]),('دفعة الفيلا والرسوم',int(d[26]),d[28]+d[29])]
+        for name,yr,cost in goal_rows:
+            target=max(0,float(cost))
+            st.write(f'**{name} ({yr})** — المطلوب {sar(target)}')
+            st.progress(min(1.0,max(0.0,current_cash/target)) if target else 1.0)
+            st.caption(f'التغطية بالنقد المسجل: {sar(current_cash)} · الفجوة: {sar(max(0,target-current_cash))}. لا تعني التغطية الحالية القدرة على تحمل الالتزامات الأخرى.')
+
 
 # Download the updated source workbook: input cells are synced, formulas preserved.
 wb=load_workbook(io.BytesIO(source));ws=wb['Inputs']
