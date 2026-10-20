@@ -82,10 +82,32 @@ def balance(principal,annual,payment,n):
  r=annual/12
  return principal*(1+r)**n-payment*((1+r)**n-1)/r if r else principal-payment*n
 
-def simulate(d):
+EARLY_DEFAULTS={'opening_cash':0.0,'opening_portfolio':0.0,'salary_2026':12500.0,'salary_2027':12500.0,'living':6500.0,'tuition':3534.0,'visa':1800.0,'bonus_2027':0.0}
+EARLY_LABELS={'opening_cash':'Cash at October 2026','opening_portfolio':'Portfolio at October 2026','salary_2026':'Net salary Oct–Dec 2026','salary_2027':'Net salary 2027','living':'Monthly living expenses (estimate)','tuition':'Monthly university fees (estimate)','visa':'Monthly credit card payment (estimate)','bonus_2027':'January 2027 bonus'}
+def read_early(data):
+ out=dict(EARLY_DEFAULTS)
+ w=load_workbook(io.BytesIO(data),read_only=False,data_only=True)
+ if 'Early Years' in w:
+  for key,val in w['Early Years'].iter_rows(min_row=2,max_col=2,values_only=True):
+   if key in out and val is not None:out[key]=float(val)
+ w.close()
+ return out
+def simulate(d,early=None):
+ early=early or EARLY_DEFAULTS
  p=d[16]-d[17]; balloon=d[16]*d[18]; term=int(d[20]); carpay=amort_payment(p,d[19],term,balloon)
  mortgage=amort_payment(max(0,d[27]-d[28]),d[30],int(d[31])*12)
- cash=d[2]; portfolio=0; rows=[]; lowest=1e18; monthly=[]
+ cash=early['opening_cash']; portfolio=early['opening_portfolio']; rows=[]; lowest=1e18; monthly=[]
+ for year in [2026,2027]:
+  income=spending=bonus_total=0
+  for month in range(10 if year==2026 else 1,13):
+   net=early['salary_2026'] if year==2026 else early['salary_2027']
+   bonus=early['bonus_2027'] if (year,month)==(2027,1) else 0
+   costs=early['living']+early['tuition']+(early['visa'] if (year,month)<=(2027,1) else 0)
+   flow=net+bonus-costs;cash+=flow;income+=net+bonus;bonus_total+=bonus;spending+=costs
+   lowest=min(lowest,cash)
+   monthly.append({'year':year,'month':month,'cash':cash,'portfolio':portfolio,'net_cash_flow':flow})
+  rows.append({'السنة':year,'الدخل':income,'البونص':bonus_total,'المعيشة والأقساط':spending,'أحداث مالية صافية':0,'استثمار جديد':0,'السيولة':cash,'المحفظة':portfolio,'الثروة السائلة':cash+portfolio})
+ cash+=d[2] # Optional additional cash injected at Jan 2028; early-year savings carry forward.
  purchase1=(int(d[21]),7); sale1=(int(d[22]),7); purchase2=(int(d[24]),7); marriage=(int(d[14]),1); villa=(int(d[26]),12)
  car_months=0; loan_balance=p; mortgage_started=False
  for year in range(2028,2041):
@@ -119,16 +141,20 @@ def simulate(d):
  return pd.DataFrame(rows),pd.DataFrame(monthly),carpay,mortgage,lowest
 
 st.markdown('## ◆ WEALTH OS')
-st.caption('PERSONAL FINANCIAL COMMAND CENTER  ·  2028—2040  ·  SAR')
+st.caption('PERSONAL FINANCIAL COMMAND CENTER  ·  OCT 2026—2040  ·  SAR')
 upload=st.sidebar.file_uploader('📂 ارفع ملف الإكسل المحدّث',type=['xlsx'])
 source=upload.getvalue() if upload else DEFAULT
-try: values=read_inputs(source)
+try: values=read_inputs(source); early_values=read_early(source)
 except Exception as e:st.error(f'تعذّر قراءة الملف: {e}');st.stop()
 st.sidebar.markdown('### ⚙️ محاكي الافتراضات')
 if 'last_file' not in st.session_state or st.session_state.last_file!=hash(source):
  st.session_state.last_file=hash(source)
  for i,v in values.items():st.session_state[f'input_{i}']=float(v)
-with st.sidebar.expander('الدخل والبونص',expanded=True):
+ for k,v in early_values.items():st.session_state[f'early_{k}']=float(v)
+with st.sidebar.expander('🗓️ 2026–2027 | مرحلة التأسيس',expanded=True):
+ for k,label in EARLY_LABELS.items():st.number_input(label,key=f'early_{k}',step=100.0,format='%.0f')
+ st.caption('مصاريف 2026–2027 تقديرية وقابلة للتعديل؛ بونص يناير 2027 يبدأ من صفر حتى تدخل قيمته.')
+with st.sidebar.expander('الدخل والبونص',expanded=False):
  for i in [5,6,7,8,9,10,11,4,3]:
   step=.01 if i in PCT else 1.0 if i in YEARS else 500.0
   st.number_input(LABELS[i],key=f'input_{i}',step=step,format='%.3f' if i in PCT else '%.0f')
@@ -139,11 +165,12 @@ with st.sidebar.expander('الفيلا والمحفظة'):
  for i in [26,27,28,29,30,31,32,33,34,35,36,37,2]:
   st.number_input(LABELS[i],key=f'input_{i}',step=.01 if i in PCT else 1.0 if i in YEARS else 1000.0,format='%.3f' if i in PCT else '%.0f')
 d={i:float(st.session_state[f'input_{i}']) for i in LABELS}
-try:annual,monthly,carpay,mortgage,lowest=simulate(d)
+early={k:float(st.session_state[f'early_{k}']) for k in EARLY_DEFAULTS}
+try:annual,monthly,carpay,mortgage,lowest=simulate(d,early)
 except Exception as e:st.error(f'تحقق من الافتراضات: {e}');st.stop()
 
 def sar(x):return f'{x:,.0f} ر.س'
-selected=st.select_slider('السنة المعروضة',options=list(range(2028,2041)),value=2035)
+selected=st.select_slider('السنة المعروضة',options=list(range(2026,2041)),value=2035)
 r=annual[annual['السنة']==selected].iloc[0]
 a,b,c,e=st.columns(4)
 a.metric('الثروة السائلة المتوقعة',sar(r['الثروة السائلة']))
@@ -190,7 +217,7 @@ with t4:
  st.markdown('#### أثر العائد الاستثماري على محفظتك')
  comparison=[]
  for rate in [.05,.08,.10]:
-  scenario=dict(d);scenario[33]=rate;out,_,_,_,_=simulate(scenario)
+  scenario=dict(d);scenario[33]=rate;out,_,_,_,_=simulate(scenario,early)
   comparison.append({'العائد المفترض':f'{rate:.0%}','محفظة 2038':out.loc[out['السنة']==2038,'المحفظة'].iloc[0],'محفظة 2040':out.loc[out['السنة']==2040,'المحفظة'].iloc[0]})
  st.dataframe(pd.DataFrame(comparison).style.format({'محفظة 2038':'{:,.0f}','محفظة 2040':'{:,.0f}'}),hide_index=True,use_container_width=True)
  st.warning('العوائد افتراضية وليست مضمونة. المحاكاة لا تشمل التضخم، الرسوم، ضرائب محتملة، الأطفال، أو هبوط الأسواق المفاجئ.')
@@ -227,7 +254,7 @@ except Exception as err:
 
 with t5:
     st.subheader('Actual vs Forecast | الفعلي مقابل الخطة')
-    st.caption('أدخل بيانات كل شهر في Update Log داخل ملف Excel، ثم ارفع الملف مجددًا. المقارنة تبدأ من يناير 2028؛ الأشهر السابقة لا تتوفر لها توقعات في النموذج.')
+    st.caption('أدخل بيانات كل شهر في Update Log داخل ملف Excel، ثم ارفع الملف مجددًا. المقارنة تبدأ من أكتوبر 2026؛ مصاريف المرحلة الأولى تقديرية.')
     if actual_error:st.warning(f'تعذر قراءة سجل الأرقام الفعلية: {actual_error}')
     elif actuals.empty:st.info('ما فيه بيانات شهرية فعلية حتى الآن. افتح تبويب Update Log في الإكسل، وأدخل التاريخ والكاش والمحفظة والديون ثم ارفعه.')
     else:
@@ -247,7 +274,7 @@ with t5:
             graph.add_trace(go.Scatter(x=valid['date'],y=valid['forecast_liquid'],name='Forecast',mode='lines+markers',line=dict(color='#D3AD71',width=3,dash='dash')))
             graph.update_layout(template='plotly_dark',paper_bgcolor='#0B111B',plot_bgcolor='#0B111B',height=360,yaxis_title='SAR')
             st.plotly_chart(graph,use_container_width=True)
-        else:st.info('أدخل النقد والمحفظة معًا في سجل Update Log للأشهر الواقعة بين 2028 و2040 لإظهار المقارنة.')
+        else:st.info('أدخل النقد والمحفظة معًا في سجل Update Log للأشهر الواقعة بين أكتوبر 2026 و2040 لإظهار المقارنة.')
         st.dataframe(actuals[['date','salary','bonus','cash','portfolio','debt','notes']].rename(columns={'date':'الشهر','salary':'الراتب','bonus':'البونص','cash':'النقد','portfolio':'المحفظة','debt':'الديون','notes':'ملاحظات'}),hide_index=True,use_container_width=True)
 
 with t6:
@@ -289,6 +316,10 @@ with t6:
 
 # Download the updated source workbook: input cells are synced, formulas preserved.
 wb=load_workbook(io.BytesIO(source));ws=wb['Inputs']
+ews=wb['Early Years'] if 'Early Years' in wb else wb.create_sheet('Early Years')
+ews.cell(1,1,'Key');ews.cell(1,2,'Value');ews.cell(1,3,'Description')
+for idx,(k,v) in enumerate(early.items(),2):
+ ews.cell(idx,1,k);ews.cell(idx,2,v);ews.cell(idx,3,EARLY_LABELS[k])
 for i,v in d.items():
     row=workbook_rows(wb)[FIELD_NAMES[i]]
     ws.cell(row,2).value=int(v) if i in YEARS else v
