@@ -190,7 +190,7 @@ c.metric('المحفظة الاستثمارية',sar(r['المحفظة']))
 e.metric('الدخل السنوي',sar(r['الدخل']))
 if lowest<0:st.error(f'⚠️ الخطة تُظهر عجزًا نقديًا مؤقتًا يصل إلى {sar(-lowest)}. يلزم تعديل توقيت الأهداف أو التمويل.')
 else:st.success('✓ لا يظهر عجز نقدي في التدفقات الشهرية وفق الافتراضات المدخلة. هذا لا يغني عن اختبار المخاطر.')
-t1,t2,t3,t4,t5,t6=st.tabs(['📊 نظرة عامة','🎯 الأهداف','💸 التدفقات النقدية','🧪 اختبار السيناريوهات','📅 Actual vs Forecast','💎 Net Worth & Portfolio'])
+t1,t2,t3,t4,t5,t6,t7=st.tabs(['📊 نظرة عامة','🎯 الأهداف','💸 التدفقات النقدية','🧪 اختبار السيناريوهات','📅 Actual vs Forecast','💎 Net Worth & Portfolio','🧭 Financial Command Center'])
 with t1:
  fig=go.Figure()
  for col,color in [('السيولة','#4DB9B4'),('المحفظة','#D3AD71'),('الثروة السائلة','#8D9FF2')]:
@@ -233,6 +233,75 @@ with t4:
  st.dataframe(pd.DataFrame(comparison).style.format({'محفظة 2038':'{:,.0f}','محفظة 2040':'{:,.0f}'}),hide_index=True,use_container_width=True)
  st.warning('العوائد افتراضية وليست مضمونة. المحاكاة لا تشمل التضخم، الرسوم، ضرائب محتملة، الأطفال، أو هبوط الأسواق المفاجئ.')
 
+
+
+with t7:
+ st.subheader('🧭 Financial Command Center | مركز التحكم المالي')
+ st.caption('الأرقام توقعات بناءً على افتراضاتك، وليست أرصدة بنكية حقيقية. اختر سنة وشهرًا لعرض الميزانية.')
+ cy=st.selectbox('السنة',list(range(2026,2041)),index=0,key='command_year')
+ cm=st.selectbox('الشهر',list(range(10,13)) if cy==2026 else list(range(1,13)),key='command_month',format_func=lambda x:f'{x:02d}')
+ def command_budget(year,month):
+  if year<=2027:
+   salary=early['salary_2026'] if year==2026 else early['salary_2027']
+   bonus=early['bonus_2027'] if (year,month)==(2027,1) else 0
+   living=early['living']
+   commitments=early['tuition']+(early['visa'] if (year,month)<=(2027,1) else 0)
+   planned=early['invest_early']
+  else:
+   gross=d[5]*(1+d[7])**(year-2028)*(1+d[9] if year>=int(d[8]) else 1)
+   salary=d[4] if year==2028 and month<=6 else gross*d[6]
+   bonus=d[3] if (year,month)==(2028,1) else gross*d[10]*d[6] if year>=int(d[11]) and month==12 else 0
+   living=d[12] if (year,month)<(int(d[14]),1) else d[13]
+   commitments=(carpay if (int(d[21]),7)<=(year,month)<(int(d[22]),7) else 0)
+   if (year,month)>(int(d[26]),12):commitments+=mortgage
+   planned=d[35] if (year,month)>(int(d[26]),12) else early['invest_pre_villa']
+  return salary,bonus,living,commitments,planned
+ salary,bonus,living,commitments,planned=command_budget(cy,cm)
+ available=salary+bonus-living-commitments
+ feasible=max(0,available)
+ a,b,c,dcol=st.columns(4)
+ a.metric('الراتب الشهري',sar(salary))
+ b.metric('الالتزامات الشهرية',sar(commitments))
+ c.metric('المصاريف الشهرية',sar(living))
+ dcol.metric('الفائض قبل الاستثمار',sar(available))
+ if bonus:st.info(f'البونص المتوقع لهذا الشهر: {sar(bonus)} — غير مضمون')
+ st.divider()
+ left,right=st.columns(2)
+ with left:
+  st.markdown('#### كم أستثمر شهريًا؟')
+  reserve=early['cash_reserve'] if (cy,cm)<=(int(d[26]),12) else d[32]
+  row=monthly[(monthly['year']==cy)&(monthly['month']==cm)]
+  cash_balance=float(row.iloc[0]['cash']) if not row.empty else 0
+  recommendation=min(max(0,planned),feasible)
+  if cash_balance<reserve:recommendation=0
+  st.metric('استثمار شهري مبدئي مناسب للميزانية',sar(recommendation))
+  st.caption(f'الاستثمار المخطط: {sar(planned)} · الاحتياطي النقدي المستهدف: {sar(reserve)}. التوصية محافظة ولا تحتسب النفقات الكبيرة غير المتكررة.')
+  st.progress(min(1.0,recommendation/planned) if planned>0 else 0.0)
+ with right:
+  st.markdown('#### كم اقتربت من هدفي؟')
+  goal=st.selectbox('اختر الهدف',['دفعة الفيلا والرسوم','تكلفة الزواج','السيارة الثانية','محفظة مليون ريال'],key='command_goal')
+  targets={
+   'دفعة الفيلا والرسوم':(d[28]+d[29],int(d[26]),12),
+   'تكلفة الزواج':(d[15],int(d[14]),1),
+   'السيارة الثانية':(d[25],int(d[24]),7),
+   'محفظة مليون ريال':(1000000,2040,12)}
+  target,gy,gm=targets[goal]
+  current=float(row.iloc[0]['portfolio'] if goal=='محفظة مليون ريال' else row.iloc[0]['cash']) if not row.empty else 0
+  pct=min(1,max(0,current/target)) if target>0 else 1
+  st.metric('نسبة الاقتراب للهدف',f'{pct:.1%}')
+  st.progress(pct)
+  st.caption(f'الرصيد المتوقع: {sar(current)} من {sar(target)} · الموعد المستهدف: {gy}/{gm:02d}. المؤشر يقارن الرصيد بالهدف ولا يضمن توفر المبلغ عند الاستحقاق.')
+  months_left=(gy-cy)*12+gm-cm
+  if months_left>0:
+   required=max(0,(target-max(0,current))/months_left)
+   st.metric('الادخار الشهري المطلوب دون عوائد',sar(required))
+   if required>feasible:st.warning('المبلغ المطلوب أعلى من الفائض الشهري الحالي. قد تحتاج لتعديل المدة أو الهدف أو المصاريف.')
+  else:st.caption('وصل موعد الهدف أو تجاوزه.')
+ st.divider()
+ st.markdown('#### توزيع الراتب والمصروفات')
+ fig=go.Figure(data=[go.Bar(x=['مصاريف المعيشة','التزامات','استثمار مقترح','فائض متبقٍ'],y=[living,commitments,recommendation,max(0,feasible-recommendation)],marker_color=['#8D9FF2','#E29A82','#D3AD71','#4DB9B4'])])
+ fig.update_layout(template='plotly_dark',paper_bgcolor='#0B111B',plot_bgcolor='#0B111B',height=330,yaxis_title='SAR')
+ st.plotly_chart(fig,use_container_width=True)
 
 # Monthly actuals come from the workbook's Update Log. No personal data is persisted on the server.
 def actual_history(raw):
